@@ -1,0 +1,137 @@
+/* ── MiniTimer — floating always-on-top pill ─────────────────────────────── */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: transparent;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+/* Root pill container — the drag region */
+.mt {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 60px;
+  padding: 0 14px 0 16px;
+  border-radius: 100px;
+  overflow: hidden;
+
+  /* Drag the whole thing except the close button */
+  -webkit-app-region: drag;
+
+  /* Visual style */
+  background: rgba(15, 23, 42, 0.90);
+  border: 1.5px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(12px);
+  color: #e2e8f0;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  transition: border-color 0.4s ease;
+}
+
+/* Progress bar — drains as time runs out */
+.mt::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  width: calc(var(--progress, 1) * 100%);
+  transition: width 1s linear, background 0.4s ease;
+  border-radius: 0 0 100px 100px;
+}
+
+/* ── Phase colours ─────────────────────────────────────────────────────────── */
+.mt.focus {
+  border-color: rgba(56, 189, 248, 0.35);
+}
+.mt.focus::after {
+  background: #38bdf8;
+}
+
+.mt.break {
+  border-color: rgba(34, 197, 94, 0.35);
+}
+.mt.break::after {
+  background: #22c55e;
+}
+
+/* ── Urgent (<60 s) — flash the border ─────────────────────────────────────── */
+.mt.urgent {
+  animation: urgentPulse 0.8s ease-in-out infinite alternate;
+}
+@keyframes urgentPulse {
+  from { border-color: rgba(239, 68, 68, 0.4); }
+  to   { border-color: rgba(239, 68, 68, 0.9); box-shadow: 0 0 20px rgba(239,68,68,0.4); }
+}
+.mt.urgent::after {
+  background: #ef4444;
+}
+
+/* ── Idle (no session) ──────────────────────────────────────────────────────── */
+.mt.idle {
+  opacity: 0.5;
+}
+
+/* ── Phase label ─────────────────────────────────────────────────────────────── */
+.mt__label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  white-space: nowrap;
+  color: #94a3b8;
+}
+
+/* ── Countdown time ──────────────────────────────────────────────────────────── */
+.mt__time {
+  font-size: 22px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+  color: #f1f5f9;
+  flex: 1;
+  text-align: center;
+}
+
+/* ── Close button ────────────────────────────────────────────────────────────── */
+.mt__close {
+  /* Must opt OUT of the drag region */
+  -webkit-app-region: no-drag;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: #475569;
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+  padding: 0;
+  line-height: 1;
+}
+.mt__close:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+/* ── URL unreadable warning ───────────────────────────────────────────────── */
+.mt__url-warn {
+  -webkit-app-region: no-drag;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: #fbbf24;       /* amber-400 */
+  white-space: nowrap;
+  flex-shrink: 0;
+  opacity: 0.85;
+  cursor: help;
+}
