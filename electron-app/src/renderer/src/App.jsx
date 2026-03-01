@@ -1,39 +1,39 @@
 /**
  * App.jsx — Root React component
  *
- * Layout: vertical sidebar (Focus / Daily / Settings) + main content area.
+ * Layout: sidebar (5 panels) + main content area.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import BlockedOverlay from './components/BlockedOverlay.jsx';
-import SessionControls from './components/SessionControls.jsx';
-import BlocklistManager from './components/BlocklistManager.jsx';
-import DailyView from './components/DailyView.jsx';
+import AppSidebar from './components/AppSidebar.jsx';
+import DashboardView from './components/DashboardView.jsx';
+import CalendarView from './components/CalendarView.jsx';
+import ProjectsView from './components/ProjectsView.jsx';
+import SessionControlsView from './components/SessionControlsView.jsx';
+import SettingsView from './components/SettingsView.jsx';
+import { useProjects } from './hooks/useProjects.js';
 
-const NAV_ITEMS = [
-  { id: 'focus',    icon: '🎯', label: 'Focus'    },
-  { id: 'daily',    icon: '📅', label: 'Daily'    },
-  { id: 'settings', icon: '⚙️', label: 'Settings' },
-];
+const PANELS = ['dashboard', 'calendar', 'projects', 'focus', 'settings'];
 
 export default function App() {
-  const [panel, setPanel]                 = useState('focus');
-  const [sessionId, setSessionId]         = useState(null);
-  const [sessionStart, setSessionStart]   = useState(null);
-  const [blocklist, setBlocklist]         = useState([]);
-  const [isDistracting, setIsDistracting] = useState(false);
-  const [windowInfo, setWindowInfo]       = useState(null);
-  const [initError, setInitError]         = useState(null);
-  const [timerState, setTimerState]       = useState({
+  const [panel, setPanel]                   = useState('dashboard');
+  const [sessionId, setSessionId]           = useState(null);
+  const [blocklist, setBlocklist]           = useState([]);
+  const [isDistracting, setIsDistracting]   = useState(false);
+  const [windowInfo, setWindowInfo]         = useState(null);
+  const [timerState, setTimerState]         = useState({
     phase: 'focus', remaining: 0, total: 0, active: false,
   });
+  const [pendingStart, setPendingStart]     = useState(null);
+  const [activeProject, setActiveProject]  = useState(null);
+
+  const { projects, addProject, updateProject, removeProject } = useProjects();
 
   // ── Bootstrap ──────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!window.electronAPI) {
-      setInitError('electronAPI not available — run inside Electron.');
-      return;
-    }
+    if (!window.electronAPI) return;
     window.electronAPI
       .invoke('blocklist:get')
       .then(setBlocklist)
@@ -57,29 +57,43 @@ export default function App() {
 
   // ── Session handlers ───────────────────────────────────────────────────
   const handleStartSession = useCallback(async (opts = {}) => {
+    if (!window.electronAPI) return;
+    if (opts.projectId) {
+      const proj = projects.find((p) => p.id === opts.projectId);
+      if (proj) setActiveProject(proj);
+    }
     const result = await window.electronAPI.invoke('session:start', opts);
-    if (result.error) { console.warn('[App] session:start:', result.error); return; }
+    if (result?.error) { console.warn('[App] session:start:', result.error); return; }
     setSessionId(result.sessionId);
-    setSessionStart(result.start_time);
-  }, []);
+  }, [projects]);
 
   const handleStopSession = useCallback(async () => {
+    if (!window.electronAPI) return;
     const result = await window.electronAPI.invoke('session:stop');
     if (result?.error) { console.warn('[App] session:stop:', result.error); return; }
     setSessionId(null);
-    setSessionStart(null);
+    setActiveProject(null);
     setIsDistracting(false);
     setWindowInfo(null);
     setTimerState({ phase: 'focus', remaining: 0, total: 0, active: false });
   }, []);
 
   const handleStartBreak = useCallback(async () => {
+    if (!window.electronAPI) return;
     const result = await window.electronAPI.invoke('session:start-break');
     if (result?.error) console.warn('[App] session:start-break:', result.error);
   }, []);
 
+  const handleStartBreakOnly = useCallback(async (opts = {}) => {
+    if (!window.electronAPI) return;
+    const result = await window.electronAPI.invoke('session:startBreakOnly', opts);
+    if (result?.error) console.warn('[App] session:startBreakOnly:', result.error);
+    else if (result?.sessionId) setSessionId(result.sessionId);
+  }, []);
+
   // ── Blocklist handlers ─────────────────────────────────────────────────
   const handleAddToBlocklist = useCallback(async (name) => {
+    if (!window.electronAPI) return;
     const result = await window.electronAPI.invoke('blocklist:add', name);
     if (result?.error) throw new Error(result.error);
     const updated = await window.electronAPI.invoke('blocklist:get');
@@ -87,82 +101,101 @@ export default function App() {
   }, []);
 
   const handleRemoveFromBlocklist = useCallback(async (id) => {
+    if (!window.electronAPI) return;
     await window.electronAPI.invoke('blocklist:remove', id);
     setBlocklist((prev) => prev.filter((item) => item.id !== id));
   }, []);
 
-  if (initError) {
-    return (
-      <div className="init-error">
-        <h2>Initialisation Error</h2>
-        <pre>{initError}</pre>
-      </div>
-    );
-  }
+  // ── Navigation bridges ─────────────────────────────────────────────────
+  const handleStartFromCalendar = useCallback((opts) => {
+    setPendingStart(opts);
+    setPanel('focus');
+  }, []);
+
+  const handleSelectProjectForFocus = useCallback((project) => {
+    setActiveProject(project);
+    setPendingStart({ projectId: project.id });
+    setPanel('focus');
+  }, []);
+
+  // Clear pending start once consumed by SessionControlsView
+  const handlePendingConsumed = useCallback(() => setPendingStart(null), []);
 
   return (
     <>
       <BlockedOverlay isVisible={isDistracting} windowInfo={windowInfo} />
 
-      <div className="app-layout">
+      <div className="flex h-screen bg-background text-foreground overflow-hidden">
 
         {/* ── Sidebar ── */}
-        <nav className="sidebar" aria-label="Main navigation">
-          <div className="sidebar__brand" aria-hidden="true">🎯</div>
-          {NAV_ITEMS.map(({ id, icon, label }) => (
-            <button
-              key={id}
-              className={`sidebar__item${panel === id ? ' sidebar__item--active' : ''}`}
-              onClick={() => setPanel(id)}
-              aria-current={panel === id ? 'page' : undefined}
-              title={label}
-            >
-              <span className="sidebar__icon">{icon}</span>
-              <span className="sidebar__label">{label}</span>
-            </button>
-          ))}
-          <div className="sidebar__spacer" />
-          <p className="sidebar__footer-hint">local only</p>
-        </nav>
+        <AppSidebar
+          activePanel={panel}
+          onPanelChange={setPanel}
+          isSessionActive={!!sessionId}
+          timerPhase={timerState.phase}
+        />
 
         {/* ── Content area ── */}
-        <main className="content-area">
-          {/* ── Focus panel ── */}
-          {panel === 'focus' && (
-            <div className="panel">
-              <div className="app-card">
-                <SessionControls
+        <main className="flex-1 overflow-hidden">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={panel}
+              initial={{ opacity: 0, x: 12 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -12 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="h-full overflow-hidden"
+            >
+              {panel === 'dashboard' && (
+                <DashboardView
+                  timerState={timerState}
+                  sessionId={sessionId}
+                  activeProject={activeProject}
+                  onNavigate={setPanel}
+                />
+              )}
+
+              {panel === 'calendar' && (
+                <CalendarView
+                  projects={projects}
+                  onStartWithSettings={handleStartFromCalendar}
+                />
+              )}
+
+              {panel === 'projects' && (
+                <ProjectsView
+                  projects={projects}
+                  onAdd={addProject}
+                  onUpdate={updateProject}
+                  onRemove={removeProject}
+                  onSelectForFocus={handleSelectProjectForFocus}
+                />
+              )}
+
+              {panel === 'focus' && (
+                <SessionControlsView
                   sessionId={sessionId}
                   timerState={timerState}
+                  projects={projects}
+                  activeProject={activeProject}
+                  pendingStart={pendingStart}
+                  onPendingConsumed={handlePendingConsumed}
                   onStart={handleStartSession}
                   onStop={handleStopSession}
                   onStartBreak={handleStartBreak}
+                  onStartBreakOnly={handleStartBreakOnly}
                 />
-              </div>
-            </div>
-          )}
+              )}
 
-          {/* ── Daily panel ── */}
-          {panel === 'daily' && (
-            <div className="panel">
-              <div className="app-card app-card--full">
-                <DailyView />
-              </div>
-            </div>
-          )}
-
-          {/* ── Settings panel ── */}
-          {panel === 'settings' && (
-            <div className="panel">
-              <div className="app-card">
-                <BlocklistManager
-                  items={blocklist}
+              {panel === 'settings' && (
+                <SettingsView
+                  blocklist={blocklist}
                   onAdd={handleAddToBlocklist}
                   onRemove={handleRemoveFromBlocklist}
                 />
-              </div>
-            </div>
-          )}
+              )}
+            </motion.div>
+          </AnimatePresence>
         </main>
       </div>
     </>

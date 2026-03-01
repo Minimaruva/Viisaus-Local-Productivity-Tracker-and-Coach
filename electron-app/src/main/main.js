@@ -31,6 +31,13 @@ const {
   removeFromBlocklist,
   getAllBlocklist,
   isBlocked,
+  getProjects,
+  upsertProject,
+  deleteProject,
+  getTodosForDate,
+  addTodo,
+  toggleTodo,
+  deleteTodo,
   closeDatabase,
 } = require('./database');
 
@@ -404,6 +411,80 @@ function registerIpcHandlers() {
   ipcMain.handle('mini:close', () => {
     closeMiniWindow();
     return { success: true };
+  });
+
+  // ── Projects ──────────────────────────────────────────────────────────────
+  ipcMain.handle('projects:get', () => getProjects());
+
+  ipcMain.handle('projects:add', (_event, project) => {
+    if (!project || !project.id) return { error: 'Invalid project.' };
+    return upsertProject(project);
+  });
+
+  ipcMain.handle('projects:update', (_event, project) => {
+    if (!project || !project.id) return { error: 'Invalid project.' };
+    return upsertProject(project);
+  });
+
+  ipcMain.handle('projects:remove', (_event, id) => {
+    if (!id) return { error: 'Invalid id.' };
+    deleteProject(id);
+    return { success: true };
+  });
+
+  // ── Todos ─────────────────────────────────────────────────────────────────
+  ipcMain.handle('todos:get', (_event, date) => {
+    if (!date) return [];
+    return getTodosForDate(date).map((t) => ({ ...t, done: t.done === 1 }));
+  });
+
+  ipcMain.handle('todos:add', (_event, { date, text }) => {
+    if (!date || !text) return { error: 'Missing date or text.' };
+    return addTodo(date, text.trim());
+  });
+
+  ipcMain.handle('todos:toggle', (_event, id) => {
+    toggleTodo(id);
+    return { success: true };
+  });
+
+  ipcMain.handle('todos:remove', (_event, id) => {
+    deleteTodo(id);
+    return { success: true };
+  });
+
+  // ── Break-only start ──────────────────────────────────────────────────────
+  // Starts a session immediately in break phase (no initial focus block).
+  ipcMain.handle('session:startBreakOnly', (_event, opts = {}) => {
+    if (currentSessionId !== null) {
+      return { error: 'A session is already active.', sessionId: currentSessionId };
+    }
+    const breakMins = (opts && typeof opts.breakDuration === 'number') ? opts.breakDuration : 5;
+    const session   = startSession();
+    currentSessionId = session.id;
+
+    // Open a break block directly.
+    const block  = startBlock(currentSessionId, 'break');
+    currentBlockId = block.id;
+
+    // Start the timer (focusDuration=25 so auto-flip to focus is sensible)
+    // then immediately override to break phase before the first tick.
+    startTimer(25, breakMins, (newPhase) => {
+      if (currentBlockId !== null) { endBlock(currentBlockId); currentBlockId = null; }
+      if (currentSessionId !== null) {
+        const b = startBlock(currentSessionId, newPhase);
+        currentBlockId = b.id;
+      }
+    });
+    // Override phase to break.
+    timerState.phase     = 'break';
+    timerState.total     = breakMins * 60;
+    timerState.remaining = breakMins * 60;
+    sendTimerTick();
+
+    createMiniWindow();
+    console.log(`[Session] Break-only started #${currentSessionId} | Break: ${breakMins}m`);
+    return { sessionId: currentSessionId, start_time: session.start_time };
   });
 }
 

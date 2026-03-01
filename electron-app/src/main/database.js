@@ -115,6 +115,22 @@ async function initDatabase() {
     );
   `);
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id   TEXT PRIMARY KEY,
+      data TEXT NOT NULL
+    );
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS todos (
+      id   INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT    NOT NULL,
+      text TEXT    NOT NULL,
+      done INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+
   _saveDatabase(); // Persist schema changes immediately.
   console.log('[DB] Schema ready.');
 }
@@ -253,6 +269,78 @@ function isBlocked(appName, url, title) {
   );
 }
 
+// ─── Projects ────────────────────────────────────────────────────────────────
+
+/**
+ * Returns all projects ordered by insertion.
+ */
+function getProjects() {
+  return _query('SELECT data FROM projects ORDER BY rowid').map((r) => JSON.parse(r.data));
+}
+
+/**
+ * Inserts or replaces a project (upsert by id).
+ * @param {object} project
+ */
+function upsertProject(project) {
+  _run('INSERT OR REPLACE INTO projects (id, data) VALUES (?, ?)', [
+    project.id,
+    JSON.stringify(project),
+  ]);
+  _saveDatabase();
+  return project;
+}
+
+/**
+ * Deletes a project by id.
+ * @param {string} id
+ */
+function deleteProject(id) {
+  _run('DELETE FROM projects WHERE id = ?', [id]);
+  _saveDatabase();
+}
+
+// ─── Todos ───────────────────────────────────────────────────────────────────
+
+/**
+ * Returns all todos for the given YYYY-MM-DD date string.
+ * @param {string} date
+ */
+function getTodosForDate(date) {
+  return _query('SELECT * FROM todos WHERE date = ? ORDER BY id', [date]);
+}
+
+/**
+ * Inserts a new todo.
+ * @param {string} date - YYYY-MM-DD
+ * @param {string} text
+ * @returns {{ id: number, date: string, text: string, done: boolean }}
+ */
+function addTodo(date, text) {
+  _run('INSERT INTO todos (date, text, done) VALUES (?, ?, 0)', [date, text]);
+  const row = _queryOne('SELECT last_insert_rowid() AS id');
+  _saveDatabase();
+  return { id: row.id, date, text, done: false };
+}
+
+/**
+ * Toggles the done state of a todo.
+ * @param {number} id
+ */
+function toggleTodo(id) {
+  _run('UPDATE todos SET done = CASE WHEN done = 0 THEN 1 ELSE 0 END WHERE id = ?', [id]);
+  _saveDatabase();
+}
+
+/**
+ * Deletes a todo by id.
+ * @param {number} id
+ */
+function deleteTodo(id) {
+  _run('DELETE FROM todos WHERE id = ?', [id]);
+  _saveDatabase();
+}
+
 /**
  * Flushes the in-memory database to disk and closes the sql.js instance.
  * Call in the 'before-quit' Electron lifecycle hook.
@@ -277,5 +365,12 @@ module.exports = {
   removeFromBlocklist,
   getAllBlocklist,
   isBlocked,
+  getProjects,
+  upsertProject,
+  deleteProject,
+  getTodosForDate,
+  addTodo,
+  toggleTodo,
+  deleteTodo,
   closeDatabase,
 };
